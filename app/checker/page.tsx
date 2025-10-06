@@ -360,7 +360,6 @@ export default function CheckerPage() {
             </div>
             {!canSubmit && (
               <p className="mt-2 text-center text-xs text-brand-medium">
-                Agregá al menos la descripción de un producto para continuar.
               </p>
             )}
           </div>
