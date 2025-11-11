@@ -1,3 +1,4 @@
+// app/checker/page.tsx
 "use client";
 
 import Image from "next/image";
@@ -33,23 +34,68 @@ export default function CheckerPage() {
     { descripcion: "", link: "" },
   ]);
 
-  const canSubmit = useMemo(
-    () => productos.some((p) => p.descripcion.trim().length > 0),
-    [productos]
-  );
+  // --- util: chequear faltantes y dar primer id para focusear ---
+  function getMissing(): { items: string[]; firstId?: string } {
+    const items: string[] = [];
+    let firstId: string | undefined;
+
+    const mark = (id: string, label: string) => {
+      items.push(label);
+      if (!firstId) firstId = id;
+    };
+
+    let hasComplete = false;
+
+    productos.forEach((p, i) => {
+      const descOk = p.descripcion.trim().length > 0;
+      const linkOk = p.link.trim().length > 0;
+
+      if (descOk && linkOk) hasComplete = true;
+
+      if (descOk && !linkOk) mark(`prod-link-${i}`, `Producto ${i + 1}: link`);
+      if (!descOk && linkOk) mark(`prod-desc-${i}`, `Producto ${i + 1}: descripción`);
+    });
+
+    // si no hay errores específicos y no hay ninguno completo, mostrar global
+    if (items.length === 0 && !hasComplete) {
+      if (productos.length > 0) {
+        const idFallback =
+          productos[0].descripcion.trim().length === 0 ? `prod-desc-0` : `prod-link-0`;
+        mark(idFallback, "Al menos un producto debe tener descripción y link");
+      } else {
+        mark("add-product", "Agregá un producto con descripción y link");
+      }
+    }
+
+    // --- INICIO DE CAMBIOS: Validar Contacto ---
+    if (!nombre.trim()) {
+      mark("input-nombre", "Nombre completo");
+    }
+    if (!email.trim()) {
+      mark("input-email", "Correo electrónico");
+    }
+    if (!telefono.trim()) {
+      mark("input-telefono", "Teléfono");
+    }
+    // --- FIN DE CAMBIOS ---
+
+    // País de origen si eligió “Otro”
+    if (origen === "Otro" && !otroPais.trim()) {
+      mark("input-otro-pais", "País de origen");
+    }
+
+    return { items, firstId };
+  }
 
   function addProducto() {
     setProductos((p) => [...p, { descripcion: "", link: "" }]);
   }
-
   function askRemoveProducto(idx: number) {
     setConfirm({ open: true, idx, type: "one" });
   }
-
   function askRemoveTodos() {
     setConfirm({ open: true, idx: null, type: "all" });
   }
-
   function doConfirmedRemove() {
     if (confirm.type === "one" && confirm.idx !== null) {
       setProductos((p) => p.filter((_, i) => i !== confirm.idx));
@@ -70,16 +116,31 @@ export default function CheckerPage() {
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!canSubmit) return;
-
-    setLoading(true);
     setNotice(null);
     setOk(null);
+
+    // validar
+    const { items, firstId } = getMissing();
+    if (items.length > 0) {
+      setNotice(
+        `<ul>${items.map((x) => `<li>${x}</li>`).join("")}</ul>`
+      );
+      // focus + scroll suave al primer faltante
+      if (firstId) {
+        const el = document.getElementById(firstId);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          (el as HTMLInputElement | HTMLTextAreaElement).focus();
+        }
+      }
+      return;
+    }
+
+    setLoading(true);
 
     const origenFinal =
       origen === "Otro" && otroPais.trim() ? otroPais.trim() : origen;
 
-    // shape que espera n8n (ideal)
     const payload = {
       timestamp: new Date().toISOString(),
       origen: "nextjs-courier-checker",
@@ -89,10 +150,11 @@ export default function CheckerPage() {
         telefono: telefono.trim(),
       },
       pais_origen: origenFinal,
+      pais_destino: destino,
       productos: productos
-        .filter((p) => p.descripcion.trim().length > 0)
-        .map((p) => ({
-          descripcion: p.descripcion.trim().replace(/^Producto \d+:\s*/, ""),
+        .filter((p) => p.descripcion.trim() && p.link.trim())
+        .map((p, i) => ({
+          descripcion: p.descripcion.trim().replace(/^Producto \d+:\s*/, "") || `Producto ${i + 1}`,
           link: p.link.trim(),
         })),
     };
@@ -149,8 +211,7 @@ export default function CheckerPage() {
             Chequeá tu importación antes de comprar
           </h1>
           <p className="mt-2 text-sm sm:text-base text-brand-medium">
-            ⚡ Ingresá la info del producto y validá si cumple con las reglas de
-            courier.
+            ⚡ Ingresá la info del producto y validá si cumple con las reglas de courier.
           </p>
         </div>
       </div>
@@ -166,11 +227,12 @@ export default function CheckerPage() {
         </p>
       </div>
 
-      {/* Banner de error */}
+      {/* Banner de error (HTML permitido para lista) */}
       {notice && (
-        <div className="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-800">
-          {notice}
-        </div>
+        <div
+          className="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-800"
+          dangerouslySetInnerHTML={{ __html: `<strong>Te falta completar:</strong>${notice}` }}
+        />
       )}
 
       {/* Formulario */}
@@ -180,14 +242,16 @@ export default function CheckerPage() {
           <h2 className="text-lg font-semibold">Datos de contacto</h2>
           <div className="mt-5 grid gap-4 sm:grid-cols-2 md:grid-cols-3">
             <input
-              required
+              id="input-nombre"
+              // required // <-- ELIMINADO
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}
               placeholder="Nombre completo*"
               className="h-11 rounded-xl border border-brand-border/80 px-3"
             />
             <input
-              required
+              id="input-email"
+              // required // <-- ELIMINADO
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -195,7 +259,8 @@ export default function CheckerPage() {
               className="h-11 rounded-xl border border-brand-border/80 px-3"
             />
             <input
-              required
+              id="input-telefono"
+              // required // <-- ELIMINADO
               value={telefono}
               onChange={(e) => setTelefono(e.target.value)}
               placeholder="Teléfono*"
@@ -206,12 +271,8 @@ export default function CheckerPage() {
 
         {/* País de origen */}
         <section className="rounded-2xl bg-white p-4 sm:p-6 shadow-md ring-1 ring-brand-border/80">
-          <h2 className="text-lg font-semibold">
-            País de origen de los productos a validar
-          </h2>
-          <p className="mt-2 text-sm text-brand-medium">
-            Seleccioná el país de origen:
-          </p>
+          <h2 className="text-lg font-semibold">País de origen de los productos a validar</h2>
+          <p className="mt-2 text-sm text-brand-medium">Seleccioná el país de origen:</p>
           <div className="mt-3 flex items-center gap-6">
             <label className="inline-flex items-center gap-2 text-sm">
               <input
@@ -239,7 +300,8 @@ export default function CheckerPage() {
 
           {origen === "Otro" && (
             <input
-              required
+              id="input-otro-pais"
+              // required // <-- ELIMINADO
               type="text"
               value={otroPais}
               onChange={(e) => setOtroPais(e.target.value)}
@@ -259,26 +321,21 @@ export default function CheckerPage() {
           <div className="mt-4 space-y-6">
             {productos.map((p, idx) => (
               <div key={idx} className="space-y-2">
-                <div className="text-sm font-medium text-brand-dark">
-                  Producto {idx + 1}
-                </div>
+                <div className="text-sm font-medium text-brand-dark">Producto {idx + 1}</div>
 
                 <div className="grid gap-3 sm:grid-cols-[1fr_320px]">
+                  {/* Descripción */}
                   <div className="grid gap-1.5">
-                    <label className="text-xs font-medium text-brand-medium">
-                      Descripción*
-                    </label>
+                    <label className="text-xs font-medium text-brand-medium">Descripción*</label>
                     <textarea
-                      required
+                      id={`prod-desc-${idx}`}
+                      // required // <-- ELIMINADO
                       rows={3}
                       value={p.descripcion}
                       onChange={(e) =>
                         setProductos((list) => {
                           const copy = [...list];
-                          copy[idx] = {
-                            ...copy[idx],
-                            descripcion: e.target.value,
-                          };
+                          copy[idx] = { ...copy[idx], descripcion: e.target.value };
                           return copy;
                         })
                       }
@@ -287,12 +344,14 @@ export default function CheckerPage() {
                     />
                   </div>
 
-                  <div className="grid gap-1.5">
+                  {/* Link obligatorio */}
+                  <div className="grid gap-1.5 min-w-0">
                     <label className="text-xs font-medium text-brand-medium">
-                      Link (opcional)
+                      Link (obligatorio para validar)
                     </label>
-                    <input
-                      type="url"
+                    <textarea
+                      id={`prod-link-${idx}`}
+                      rows={3}
                       value={p.link}
                       onChange={(e) =>
                         setProductos((list) => {
@@ -301,8 +360,8 @@ export default function CheckerPage() {
                           return copy;
                         })
                       }
-                      placeholder="https://..."
-                      className="h-11 rounded-xl border border-brand-border/80 px-3"
+                      placeholder="Pegá el link exacto del producto. Lo necesitamos para verificarlo."
+                      className="rounded-xl border border-brand-border/80 px-3 py-2"
                     />
                   </div>
                 </div>
@@ -312,9 +371,7 @@ export default function CheckerPage() {
                     type="button"
                     onClick={() => askRemoveProducto(idx)}
                     disabled={productos.length === 1}
-                    className="inline-flex h-10 items-center justify-center rounded-xl 
-                               border border-brand-border/90 bg-brand-light px-4 text-sm font-medium 
-                               text-brand-dark shadow-sm transition disabled:opacity-50"
+                    className="inline-flex h-10 items-center justify-center rounded-xl border border-brand-border/90 bg-brand-light px-4 text-sm font-medium text-brand-dark shadow-sm transition disabled:opacity-50"
                   >
                     🗑️ Eliminar
                   </button>
@@ -327,18 +384,17 @@ export default function CheckerPage() {
 
           <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:gap-4">
             <button
+              id="add-product"
               type="button"
               onClick={addProducto}
-              className="inline-flex h-10 w-full sm:w-auto flex-1 items-center justify-center rounded-xl 
-                         border border-brand-border/90 bg-brand-light px-4 text-sm font-semibold text-brand-dark shadow-sm hover:bg-white"
+              className="inline-flex h-10 w-full sm:w-auto flex-1 items-center justify-center rounded-xl border border-brand-border/90 bg-brand-light px-4 text-sm font-semibold text-brand-dark shadow-sm hover:bg-white"
             >
               ➕ Agregar producto
             </button>
             <button
               type="button"
               onClick={askRemoveTodos}
-              className="inline-flex h-10 w-full sm:w-auto flex-1 items-center justify-center rounded-xl 
-                         border border-brand-border/90 bg-brand-light px-4 text-sm font-semibold text-brand-dark shadow-sm hover:bg-white"
+              className="inline-flex h-10 w-full sm:w-auto flex-1 items-center justify-center rounded-xl border border-brand-border/90 bg-brand-light px-4 text-sm font-semibold text-brand-dark shadow-sm hover:bg-white"
             >
               🗑️ Eliminar todos
             </button>
@@ -350,18 +406,12 @@ export default function CheckerPage() {
           <div className="rounded-2xl bg-white/90 p-4 shadow-md ring-1 ring-brand-border/80 backdrop-blur">
             <div className="flex justify-center">
               <button
-                disabled={loading || !canSubmit}
-                className="w-full sm:w-auto inline-flex h-11 items-center justify-center rounded-xl 
-                           border border-brand-border/90 bg-brand-light px-4 sm:px-6 font-semibold text-brand-dark
-                           transition disabled:opacity-50 hover:bg-white"
+                disabled={loading}
+                className="w-full sm:w-auto inline-flex h-11 items-center justify-center rounded-xl border border-brand-border/90 bg-brand-light px-4 sm:px-6 font-semibold text-brand-dark transition disabled:opacity-50 hover:bg-white"
               >
-                {loading ? "Enviando..." : "🔎 Validar productos"}
+                {loading ? "Enviando..." : "📩 Solicitar validación"}
               </button>
             </div>
-            {!canSubmit && (
-              <p className="mt-2 text-center text-xs text-brand-medium">
-              </p>
-            )}
           </div>
         </div>
       </form>
@@ -386,9 +436,7 @@ export default function CheckerPage() {
               </a>
               .
             </p>
-            <p className="mt-2 text-sm text-brand-medium">
-              Podés cargar otro si querés.
-            </p>
+            <p className="mt-2 text-sm text-brand-medium">Podés cargar otro si querés.</p>
 
             <div className="mt-6 flex justify-end gap-4">
               <button
@@ -429,8 +477,7 @@ export default function CheckerPage() {
                 : `¿Eliminar producto ${((confirm.idx ?? 0) as number) + 1}?`}
             </h2>
             <p className="mt-2 text-sm text-brand-medium">
-              Recordá que esta acción es permanente y no podrás recuperar la
-              información de este producto.
+              Recordá que esta acción es permanente y no podrás recuperar la información de este producto.
             </p>
 
             <div className="mt-6 flex justify-end gap-3">
